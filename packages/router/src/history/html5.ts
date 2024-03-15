@@ -72,14 +72,22 @@ function useHistoryListeners(
   }: {
     state: StateEntry | null
   }) => {
+    // 新跳转地址
     const to = createCurrentLocation(base, location)
+    // 当前路由地址
     const from: HistoryLocation = currentLocation.value
+     // 当前state
     const fromState: StateEntry = historyState.value
+      // 计步器
+
     let delta = 0
 
     if (state) {
-      currentLocation.value = to
-      historyState.value = state
+       // 目标路由state不为空时，更新currentLocation和historyState缓存
+    currentLocation.value = to
+    historyState.value = state
+
+    // 暂停监控时，中断跳转并重置pauseState
 
       // ignore the popstate and reset the pauseState
       if (pauseState && pauseState === from) {
@@ -96,6 +104,7 @@ function useHistoryListeners(
     // to be updated before triggering the listeners. Some kind of validation function would also
     // need to be passed to the listeners so the navigation can be accepted
     // call all listeners
+    // 发布跳转事件，将Location、跳转类型、跳转距离等信息返回给所有注册的订阅者，并执行注册回调
     listeners.forEach(listener => {
       listener(currentLocation.value, from, {
         delta,
@@ -109,10 +118,12 @@ function useHistoryListeners(
     })
   }
 
+  // 暂停监听
   function pauseListeners() {
     pauseState = currentLocation.value
   }
 
+  // 注册监听逻辑,并且返回停止该监听的方法teardown
   function listen(callback: NavigationCallback) {
     // set up the listener and prepare teardown callbacks
     listeners.push(callback)
@@ -126,6 +137,7 @@ function useHistoryListeners(
     return teardown
   }
 
+  //关闭页面前会执行这个方法，主要作用是记录下当前页面滚动。
   function beforeUnloadListener() {
     const { history } = window
     if (!history.state) return
@@ -176,6 +188,9 @@ function buildState(
     scroll: computeScroll ? computeScrollPosition() : null,
   }
 }
+// 使用了H5 History能力。其中history.pushState 和history.replaceState 方法被封装到一个名为locationChange的路径变化处理函数中，而locationChange作为一个公共函数，则被push 和 replace 函数调用，这2个函数，也就是我们熟知的Router push 和 Router replace 方法。
+// 另外，vue router history的state对象底层也是用到了history.state，只不过再封装成符合vue router的state罢了。
+// 最后，useHistoryStateNavigation方法把push、replace、state、location集成到一个对象中返回，完成了history的初始化。
 
 function useHistoryStateNavigation(base: string) {
   const { history, location } = window
@@ -259,7 +274,7 @@ function useHistoryStateNavigation(base: string) {
     changeLocation(to, state, true)
     currentLocation.value = to
   }
-
+  
   function push(to: HistoryLocation, data?: HistoryState) {
     // Add to current entry the information of where we are going
     // as well as saving the current position
@@ -283,7 +298,9 @@ function useHistoryStateNavigation(base: string) {
           `You can find more information at https://next.router.vuejs.org/guide/migration/#usage-of-history-state.`
       )
     }
+    //第一次是给router history添加forward和scroll的中间跳转，其作用是保存当前页面的滚动位置。
 
+  
     changeLocation(currentState.current, currentState, true)
 
     const state: StateEntry = assign(
@@ -292,8 +309,13 @@ function useHistoryStateNavigation(base: string) {
       { position: currentState.position + 1 },
       data
     )
-
+    
     changeLocation(to, state, false)
+    // 为什么要2次跳转才能保存页面位置？ 第一次跳转就是把位置信息记录更新（replaceState）到 未跳转时的router state，以便后面回退时回到原位置
+    //大家试想下，当你浏览一个页面，滚动到某个位置，你利用history.pushState跳转到另一个页面时，history堆栈会压入一条记录，但同时vue router会帮助你记录跳转前页面位置，以便在回退时恢复滚动位置。要实现这个效果，就必须在push方法中，在调用changeLocation前把当前页面位置记录到router state中。
+    // 要实现这个功能方法有多种，最简单方法就是在跳转前把位置信息记录好放进state里面，然后通过changeLocation(to, state, false)实现跳转。
+    // 但官方用了另一种优雅方法解决这个问题，就是在最终跳转前先来一次replace模式的中间跳转，这样在不破坏原页面信息基础上更新了router state，省去更多与页面位置相关的连带处理。这就有了push方法中2次调用changeLocation。
+
     currentLocation.value = to
   }
 
@@ -312,9 +334,12 @@ function useHistoryStateNavigation(base: string) {
  * @param base -
  */
 export function createWebHistory(base?: string): RouterHistory {
+  
   base = normalizeBase(base)
-
+  //创建vue router 的history对象，包含4个属性：location（当前location）、state（路由页面的history state）、和push、replace2个方法；
+  //同时检测history.state是否为空，如果为空，需要压入一个初始化的currentLocation
   const historyNavigation = useHistoryStateNavigation(base)
+  // 创建路由监听器
   const historyListeners = useHistoryListeners(
     base,
     historyNavigation.state,
